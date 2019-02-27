@@ -1,0 +1,25 @@
+Simple mailer that allows server to send mail through configured smarthost.
+Nevertheless it maintains queue to keep mail in case of delivery failure.
+To avoid spam explosions or eternal generating forward loops per-user send limits can be confugured.
+Please set it accordingly with expected mail traffic bursts.
+Minimal additional feature is local mail delivery.
+Any advanced configuration may be implemented directly in the code.
+
+Installation
+
+Installator creates dumbhost.conf at /etc. Edit it.
+  Default and per-user hourly limit
+  Domain for outgoing mail
+  Will all user share same name or use username for generating email
+  Smarthost IP, port, username, password
+
+sendmail script is placed as /usr/bin/sendmail. You must chown +s it and create symlink where needed
+(for example /usr/lib/sendmail - where mail executable will get it)
+Create mqueue directory (see config).
+Create empty /etc/aliases if none exists.
+Create history directory /var/dumbhost
+
+TODO:
+
+.forward file in user directory
+And local delivery at all

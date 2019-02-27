@@ -1,0 +1,224 @@
+#!python
+
+import os
+import smtplib
+import sys
+import pwd
+import re
+import syslog
+import getopt
+import json
+import glob
+
+from dumbhost import config
+from dumbhost import history
+from dumbhost import smarthost
+from dumbhost import headers
+
+syslog.openlog("dumbhost", syslog.LOG_PID, syslog.LOG_MAIL)
+os.umask(027)
+
+""" send mail to all notified addresses and try to run queue """
+""" without params - just run queue """
+
+""" make group/other execute only (not read) to prevent submission password comprometation """
+
+#print os.getuid()
+#print os.geteuid()
+#print pwd.getpwuid(os.getuid())
+#print pwd.getpwall()
+
+syslog.syslog("Args=["+' '.join(sys.argv)+"] User=["+pwd.getpwuid(os.getuid()).pw_name+"]")
+
+opts, params = getopt.getopt(sys.argv[1:], 'o:q')
+end_with_dot = True
+runqueue = False
+
+for opt, optv in opts:
+  if opt == '-o':
+    if optv == 'i':
+      #syslog.syslog("-oi")
+      end_with_dot = False
+  if opt == '-q':
+    runqueue = True
+
+username = pwd.getpwuid(os.getuid()).pw_name
+#queueonly = False
+
+mailfrom = config.MASQUERADE_SENDER or (username + '@' + config.ADD_DOMAIN)
+
+aliases = {}
+for l in open(config.ALIASES):
+  c = l.find('#')
+  if c != -1:
+    l = l[:c]
+  l=l.strip()
+  if not l:
+    continue
+  e, a = l.split(':')
+  a=filter(lambda x: x, re.split('\s+', a))
+  aliases.setdefault(e, []).extend(a)
+  #print e, '->', a
+
+def resolve_aliases(l):
+  # put already resolved aliases to list, if they appear again drop the re-occurence
+  resolved = set()
+  output = []
+  i = 0
+  while i<len(l):
+    if l[i] in resolved:
+      pass
+    elif l[i] in aliases:
+      resolved.add(l[i])
+      l.extend(aliases[l[i]])
+    else:
+      output.append(l[i])
+    i+=1
+
+  return output
+
+def read_message(end_with_dot):
+    """ read message from stdin """
+    firstline = True
+    while True:
+      l = sys.stdin.readline()
+      if end_with_dot:
+        if l == ".\n":
+          break
+      else:
+        if l == "":
+          break
+      if firstline:
+        _, fromname, date = l.split(" ", 2)
+        firstline = False
+      else:
+        yield l
+    return
+
+class BadWriter:
+  def __init__(self, folder, counterfile, ext):
+    self.folder=folder
+    try:
+      os.makedirs(folder)
+    except OSError as e:
+      if e.args[0]!=17: # not File Exists error
+        raise e
+
+    self.counterfile=counterfile
+    self.ext=ext
+    try:
+      self.badcounter=int(open(counterfile).read().strip())
+    except:
+      self.badcounter=1
+
+  def open(self):
+    f=open(os.path.join(self.folder, "%012X.%s"%(self.badcounter, self.ext)), "wb")
+    self.badcounter+=1
+    return f
+
+  def write(self, data, status):
+    f=open(os.path.join(self.folder, "%012X.%s"%(self.badcounter, self.ext)), "wb")
+    f.write(data)
+    f.close()
+
+    if status:
+      f=open(os.path.join(self.folder, "%012X.status"%self.badcounter), "w")
+      f.write(status)
+      f.close()
+
+    self.badcounter+=1
+
+  def __del__(self):
+    open(self.counterfile,"w").write(str(self.badcounter))
+
+  def list(self):
+    return glob.glob(os.path.join(self.folder, "????????????.%s"%self.ext))
+
+
+queue = BadWriter(config.QUEUE_DIR, os.path.join(config.QUEUE_DIR,"counter"), "q")
+
+def put_queue(sender, fails, data, msg):
+  f = queue.open()
+  json.dump({"sender": sender, "recipients": list(fails), "message": data, "comment": msg}, f)
+  f.close()
+
+
+def send_to(sender, recipients, data):
+# group recipients by delivery type
+#  print "sender=", sender
+#  print "recipients=", recipients
+
+  def mail_class(r):
+    if r.find("@")!=-1:
+      return "smtp"
+    return "local"
+
+  rec={}
+  for r in recipients:
+    rec.setdefault(mail_class(r), set()).add(r)
+
+# for each type call deliver function, save list of recipients that has delivery failure
+
+  for rclass, rs in rec.items():
+    if rclass == 'local':
+      syslog.syslog("local " + ", ".join(rs))
+      r, fails = local.deliver(sender, rs, data)
+      syslog.syslog("result: " + r)
+    elif rclass == 'smtp':
+      syslog.syslog("smtp " + ", ".join(rs))
+      open("/tmp/smtpdump", "wb").write(data) # !!!
+      r, fails = smarthost.deliver(sender, rs, data)
+      syslog.syslog("result: " + r)
+    else:
+      syslog.syslog("bad deliver class "+rclass+" "+", ".join(rs))
+      r, fails = "Bad deliver class "+rclass, rs
+
+# if list of recipients with failed delivery is not empty save message in queue
+    if fails:
+      try:
+        put_queue(sender, fails, data, r)
+# if it fails log message to syslog
+      except e:
+        syslog.syslog(traceback.format_exc())
+
+
+### chech if there recipients in cmd line and if yes act as message sender
+
+recipients = resolve_aliases(params)
+if recipients: # is this new message
+  #print "Check user send limit"
+  if history.get_send_permission(username):
+    data = ''.join(headers.check(read_message(end_with_dot), mailfrom, recipients))
+    send_to(mailfrom, recipients, data)
+  else:
+    syslog.syslog("send limit for "+username+" is exhausted")
+
+### message processed, try to run queue if asked ###
+
+if runqueue:
+  syslog.syslog("run queue")
+  for qfile in queue.list():
+    qf=open(qfile)
+    qdata = json.load(qf)
+    qf.close()
+    print qfile, qdata["sender"], qdata["recipients"]
+    send_to(qdata["sender"], qdata["recipients"], qdata["message"])
+    os.unlink(qfile) # yes it can duplicate if exited after re-queue but before unlink
+
+# limiting sent mail count allows detect local spamer, gone crazy services and eliminate .forward exploiting
+#   for big list mailing, self-mailing with or without mail duplication, loop cross-mailing with or without 
+#   duplication
+
+# ??? if message queued, asked permission must be revoked or
+# message must be put in root queue
+# we cannot keep messages which "already allowed in user queue as user can modify this queue
+
+
+
+# refused ideas
+#""" queue -> ~/.mqueue """ - queue must be unaccessible to user to prevent limit passing
+#""" address -> ~/.email or make from username """ - email always made from sending user
+#    maybe email may be made using aliases (send from aliased address if it is unique)
+#AUTOALIASES = True # use .email files for resolving recipient addresses
+# IMNPORTANT:
+# QUEUE run - impersonate with user if delivering to file or pipe to process

@@ -1,0 +1,1 @@
+""" supplementary package for dumbhost mailer """
