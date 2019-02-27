@@ -1,8 +1,8 @@
 Metadata-Version: 1.0
 Name: dumbhost
-Version: 0.1
+Version: 0.2
 Summary: simple mailer for satellite hosts
-Home-page: http://sergey.fidoman.ru/code/dumbhost/
+Home-page: http://github.com/fidoman/dumbhost
 Author: Sergey Dorofeev
 Author-email: sergey@fidoman.ru
 License: MIT

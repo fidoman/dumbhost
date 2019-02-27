@@ -23,3 +23,7 @@ TODO:
 
 .forward file in user directory
 And local delivery at all
+
+VERSIONS
+
+0.2 - added support for crond (recipients are only in headers)

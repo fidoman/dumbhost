@@ -14,7 +14,7 @@ def domainize(a):
 
 # TODO: folding
 
-def check(data, sender, recipients):
+def check(data, sender, recipients, store_fields={}):
 #  print "headers.check:", sender, recipients
   header = True
   has_from = False
@@ -31,8 +31,10 @@ def check(data, sender, recipients):
         if field =="To":
           l = "To: "+domainize(val)+"\n"
           has_to = True
+          store_fields.setdefault("to", []).append(domainize(val))
         elif field == "From":
           l = "From: "+domainize(val)+"\n"
+          store_fields.setdefault("from", []).append(domainize(val))
           has_from = True
         elif field == "Date":
           has_date = True

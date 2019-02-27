@@ -1,4 +1,4 @@
-#!python
+#!/usr/bin/python
 
 import os
 import smtplib
@@ -30,7 +30,7 @@ os.umask(027)
 
 syslog.syslog("Args=["+' '.join(sys.argv)+"] User=["+pwd.getpwuid(os.getuid()).pw_name+"]")
 
-opts, params = getopt.getopt(sys.argv[1:], 'o:q')
+opts, params = getopt.getopt(sys.argv[1:], 'o:qiF:tf:')
 end_with_dot = True
 runqueue = False
 
@@ -39,6 +39,9 @@ for opt, optv in opts:
     if optv == 'i':
       #syslog.syslog("-oi")
       end_with_dot = False
+  if opt == '-i':
+    end_with_dot = False
+
   if opt == '-q':
     runqueue = True
 
@@ -46,6 +49,8 @@ username = pwd.getpwuid(os.getuid()).pw_name
 #queueonly = False
 
 mailfrom = config.MASQUERADE_SENDER or (username + '@' + config.ADD_DOMAIN)
+
+syslog.syslog("From=["+mailfrom+"]")
 
 aliases = {}
 for l in open(config.ALIASES):
@@ -185,13 +190,23 @@ def send_to(sender, recipients, data):
 ### chech if there recipients in cmd line and if yes act as message sender
 
 recipients = resolve_aliases(params)
+
+msg_fields = {}
+msg_lines = headers.check(read_message(end_with_dot), mailfrom, recipients, store_fields=msg_fields)
+msg_data = ''.join(msg_lines) # run generators
+
+if not recipients:
+  recipients = msg_fields["to"]
+  syslog.syslog("no recipients specified, take from message: "+", ".join(recipients))
+
 if recipients: # is this new message
   #print "Check user send limit"
   if history.get_send_permission(username):
-    data = ''.join(headers.check(read_message(end_with_dot), mailfrom, recipients))
-    send_to(mailfrom, recipients, data)
+    send_to(mailfrom, recipients, msg_data)
   else:
-    syslog.syslog("send limit for "+username+" is exhausted")
+    syslog.syslog("send limit for "+username+" is exhausted, refuse to send anything")
+else:
+  syslog.syslog("no recipients, message dropped")
 
 ### message processed, try to run queue if asked ###
 
