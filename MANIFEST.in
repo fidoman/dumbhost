@@ -1,0 +1,3 @@
+include dumbhost.conf
+include dumbhost.license
+include doc/*

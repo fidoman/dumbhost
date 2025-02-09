@@ -1,0 +1,13 @@
+README
+dumbhost.conf
+dumbhost.license
+sendmail
+setup.py
+doc/rfc5322.html
+dumbhost/__init__.py
+dumbhost/config.py
+dumbhost/headers.py
+dumbhost/history.py
+dumbhost/local.py
+dumbhost/smarthost.py
+test/test_history.py
